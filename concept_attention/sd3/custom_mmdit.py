@@ -123,29 +123,35 @@ class CustomJointAttnProcessor2_0:
         # dropout
         hidden_states = attn.to_out[1](hidden_states)
 
-        # # Compute the attention maps
-        # attention_map = einops.einsum(
-        #     query, 
-        #     key, 
-        #     "batch heads queries dim, batch heads keys dim -> batch heads queries keys",
-        # )
-        text_keys = key[:, :, -encoder_hidden_states.shape[1]:, :]
-        image_queries = query[:, :, :-encoder_hidden_states.shape[1], :]
-        cross_attention_maps = einops.einsum(
-            text_keys,
-            image_queries,
-            "batch heads queries dim, batch heads keys dim -> batch heads queries keys",
-        )
-        # Average over the heads dimension
-        cross_attention_maps = cross_attention_maps.mean(dim=1)
-        cross_attention_maps = cross_attention_maps.detach().cpu()
-        # Pull out the cross attention maps
-        # Use text queries and image keys 
-        # text_queries = query[:, :, -encoder_hidden_states.shape[0]:, :]
-        # image_keys = key[:, :, :-encoder_hidden_states.shape[0], :]
-        # cross_attention_maps = attention_map[:, :, :, :-encoder_hidden_states.shape[1]]
-        # cross_attention_maps = cross_attention_maps[:, :, -encoder_hidden_states.shape[1]:, :]
-        # cross_attention_maps = cross_attention_maps.detach().cpu()
+        # Compute cross-attention maps only when encoder_hidden_states is present (joint attention)
+        # For pure self-attention (attn2 in dual attention layers), encoder_hidden_states is None
+        if encoder_hidden_states is not None:
+            # # Compute the attention maps
+            # attention_map = einops.einsum(
+            #     query,
+            #     key,
+            #     "batch heads queries dim, batch heads keys dim -> batch heads queries keys",
+            # )
+            text_keys = key[:, :, -encoder_hidden_states.shape[1]:, :]
+            image_queries = query[:, :, :-encoder_hidden_states.shape[1], :]
+            cross_attention_maps = einops.einsum(
+                text_keys,
+                image_queries,
+                "batch heads queries dim, batch heads keys dim -> batch heads queries keys",
+            )
+            # Average over the heads dimension
+            cross_attention_maps = cross_attention_maps.mean(dim=1)
+            cross_attention_maps = cross_attention_maps.detach().cpu()
+            # Pull out the cross attention maps
+            # Use text queries and image keys
+            # text_queries = query[:, :, -encoder_hidden_states.shape[0]:, :]
+            # image_keys = key[:, :, :-encoder_hidden_states.shape[0], :]
+            # cross_attention_maps = attention_map[:, :, :, :-encoder_hidden_states.shape[1]]
+            # cross_attention_maps = cross_attention_maps[:, :, -encoder_hidden_states.shape[1]:, :]
+            # cross_attention_maps = cross_attention_maps.detach().cpu()
+        else:
+            # Pure self-attention mode (no text conditioning)
+            cross_attention_maps = None
 
         if encoder_hidden_states is not None:
             return hidden_states, encoder_hidden_states, encoder_output_vectors, image_output_vectors, cross_attention_maps
@@ -321,7 +327,7 @@ class CustomJointTransformerBlock(nn.Module):
         hidden_states = hidden_states + attn_output
 
         if self.use_dual_attention:
-            attn_output2 = self.attn2(hidden_states=norm_hidden_states2, **joint_attention_kwargs)
+            attn_output2, _ = self.attn2(hidden_states=norm_hidden_states2, **joint_attention_kwargs)
             attn_output2 = gate_msa2.unsqueeze(1) * attn_output2
             hidden_states = hidden_states + attn_output2
 

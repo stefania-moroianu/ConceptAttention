@@ -4,9 +4,9 @@ import PIL
 import matplotlib.pyplot as plt
 from typing import Optional
 
-from hopfield_saes.flux_sparse_coding.segmentation import SegmentationAbstractClass
-from hopfield_saes.flux_sparse_coding.utils import linear_normalization
-from hopfield_saes.flux_sparse_coding.binary_segmentation_baselines.sd3_src.pipeline import CustomStableDiffusion3Pipeline, CustomSD3Transformer2DModel, calculate_shift, retrieve_timesteps
+from concept_attention.segmentation import SegmentationAbstractClass
+from concept_attention.utils import linear_normalization
+from concept_attention.sd3.pipeline import CustomStableDiffusion3Pipeline, CustomSD3Transformer2DModel, calculate_shift, retrieve_timesteps
 from diffusers.utils.torch_utils import randn_tensor
 
 def load_sd3_turbo_pipeline(device="cuda"):
@@ -17,6 +17,23 @@ def load_sd3_turbo_pipeline(device="cuda"):
     )
     pipe = CustomStableDiffusion3Pipeline.from_pretrained(
         "stabilityai/stable-diffusion-3.5-large-turbo", 
+        torch_dtype=torch.bfloat16,
+        transformer=transformer
+    )
+    pipe = pipe.to(device)
+
+    return pipe
+
+
+def load_sd3_medium_pipeline(device="cuda"):
+    print("Loading SD3 Medium pipeline")
+    transformer = CustomSD3Transformer2DModel.from_pretrained(
+        "stabilityai/stable-diffusion-3.5-medium",
+        subfolder="transformer",
+        torch_dtype=torch.bfloat16
+    )
+    pipe = CustomStableDiffusion3Pipeline.from_pretrained(
+        "stabilityai/stable-diffusion-3.5-medium", 
         torch_dtype=torch.bfloat16,
         transformer=transformer
     )
@@ -39,14 +56,32 @@ def retrieve_latents(
 
 
 class SD3SegmentationModel(SegmentationAbstractClass):
-    
+
     def __init__(self, mode="concept_attention", device="cuda"):
         self.device = device
         # Set the mode
         assert mode in ["concept_attention", "cross_attention"]
         self.mode = mode
         # Load the pipeline
-        self.pipe = load_sd3_turbo_pipeline(device=device)
+        # self.pipe = load_sd3_turbo_pipeline(device=device)
+        self.pipe = load_sd3_medium_pipeline(device=device)
+        # Detect number of layers in the loaded model
+        self.num_layers = self._detect_num_layers()
+        print(f"Detected {self.num_layers} transformer layers in loaded model")
+
+    def _detect_num_layers(self):
+        """
+        Dynamically detect the number of transformer layers from the loaded model.
+
+        Returns:
+            int: Number of transformer layers
+        """
+        if hasattr(self.pipe.transformer, 'config') and hasattr(self.pipe.transformer.config, 'num_layers'):
+            return self.pipe.transformer.config.num_layers
+        elif hasattr(self.pipe.transformer, 'transformer_blocks'):
+            return len(self.pipe.transformer.transformer_blocks)
+        else:
+            raise ValueError("Could not detect number of layers from transformer model")
     
     @torch.no_grad()
     def encode_image(
@@ -111,12 +146,12 @@ class SD3SegmentationModel(SegmentationAbstractClass):
     
     @torch.no_grad()
     def segment_individual_image(
-        self, 
-        image, 
-        concepts, 
-        caption, 
+        self,
+        image,
+        concepts,
+        caption,
         timestep_index=-2,
-        layer_range=(0, 38),
+        layer_range=None,
         softmax=True,
         num_inference_steps=4,
         # num_samples=1,
@@ -124,6 +159,18 @@ class SD3SegmentationModel(SegmentationAbstractClass):
         concept_scale_factors=None,
         **kwargs
     ):
+        # Set default layer_range if not provided
+        if layer_range is None:
+            layer_range = (0, self.num_layers)
+            print(f"Using default layer_range: {layer_range}")
+
+        # Validate layer_range
+        if layer_range[1] > self.num_layers:
+            raise ValueError(
+                f"layer_range end ({layer_range[1]}) exceeds number of available layers ({self.num_layers}). "
+                f"This model has {self.num_layers} layers. Please adjust layer_range accordingly."
+            )
+
         if concept_scale_factors is None:
             concept_scale_factors = [1.0] * len(concepts)
             concept_scale_factors = torch.tensor(concept_scale_factors).to(self.device)

@@ -37,8 +37,10 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    print(args)
+
     # Create results directory if it doesn't exist
-    os.makedirs("results", exist_ok=True)
+    # os.makedirs("results", exist_ok=True)
 
     # Load the segmentation model
     segmentation_model = SD3SegmentationModel(
@@ -70,10 +72,10 @@ if __name__ == "__main__":
         ax.imshow(heatmap, cmap='inferno', interpolation='none')
 
         # Save the figure
-        output_path = os.path.join("results", f"saliency_{concept}.png")
+        output_path = f"saliency_medium_{concept}.png"
         plt.savefig(output_path, dpi=150)
         plt.close()
 
         print(f"Saved saliency map for '{concept}' to {output_path}")
 
-    print(f"\nAll saliency maps saved to results/ directory")
+    print(f"\nAll saliency maps saved to current directory")

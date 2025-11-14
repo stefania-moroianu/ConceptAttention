@@ -3,6 +3,7 @@ import einops
 import PIL
 import matplotlib.pyplot as plt
 from typing import Optional
+from safetensors.torch import load_file
 
 from concept_attention.segmentation import SegmentationAbstractClass
 from concept_attention.utils import linear_normalization
@@ -41,6 +42,30 @@ def load_sd3_medium_pipeline(device="cuda"):
 
     return pipe
 
+
+def load_sd3_medium_cxr_pipeline(device="cuda"):
+    print("Loading SD3 Medium pipeline")
+    transformer = CustomSD3Transformer2DModel.from_pretrained(
+        "stabilityai/stable-diffusion-3.5-medium",
+        subfolder="transformer",
+        torch_dtype=torch.bfloat16
+    )
+    pipe = CustomStableDiffusion3Pipeline.from_pretrained(
+        "stabilityai/stable-diffusion-3.5-medium", 
+        torch_dtype=torch.bfloat16,
+        transformer=transformer
+    )
+
+    mmdit_weights_path = "/p/scratch/transfernetx/moroianu1/sd3_srrg/job_debug/checkpoint-90000/transformer/diffusion_pytorch_model.safetensors"
+    print(f"Loading custom MM-DiT weights from: {mmdit_weights_path}")
+    mmdit_state_dict = load_file(mmdit_weights_path)
+    pipe.transformer.load_state_dict(mmdit_state_dict)
+    print("Custom MM-DiT weights loaded.")
+
+    pipe = pipe.to(device)
+
+    return pipe
+
 # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img.retrieve_latents
 def retrieve_latents(
     encoder_output: torch.Tensor, generator: Optional[torch.Generator] = None, sample_mode: str = "sample"
@@ -64,7 +89,7 @@ class SD3SegmentationModel(SegmentationAbstractClass):
         self.mode = mode
         # Load the pipeline
         # self.pipe = load_sd3_turbo_pipeline(device=device)
-        self.pipe = load_sd3_medium_pipeline(device=device)
+        self.pipe = load_sd3_medium_cxr_pipeline(device=device)
         # Detect number of layers in the loaded model
         self.num_layers = self._detect_num_layers()
         print(f"Detected {self.num_layers} transformer layers in loaded model")
